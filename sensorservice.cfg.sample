@@ -1,0 +1,17 @@
+[main]
+frequency = 433748300
+binary = /usr/bin/rtl_433
+
+[file]
+path = /tmp/433sensors
+
+[mqtt]
+broker = localhost
+port = 1883
+username = mqtt-user
+password = mqtt-pass
+
+[alias]
+1.1.1 = outside
+2.2.2 = inside
+
