@@ -18,6 +18,7 @@ Settings are stored in `sensorservice.cfg` and are read at start. If no settings
 ### Default settings
 
 **main**
+
 | Argument  | Value      | Default          | Description                        |
 |-----------|------------|------------------|------------------------------------|
 | binary    | file path  | /usr/bin/rtl_433 | The path for the `rtl_433` binary. |
@@ -25,11 +26,13 @@ Settings are stored in `sensorservice.cfg` and are read at start. If no settings
 | frequency | integer    | 433748300        | The frequency in Hz to tune to.    |
 
 **file**
+
 | Argument | Value     | Default         | Description                                   |
 |----------|-----------|-----------------|-----------------------------------------------|
 | path     | file path | /tmp/433sensors | The path to the directory to output files to. |
 
 **mqtt**
+
 | Argument  | Value       | Default | Description                           |
 |-----------|-------------|---------|---------------------------------------|
 | broker    | IP/hostname |         | The MQTT broker server address.       |
@@ -38,6 +41,7 @@ Settings are stored in `sensorservice.cfg` and are read at start. If no settings
 | password  | string      |         | The password for login on the broker. |
 
 **alias** (accepts one line per sensor)
+
 | Argument    | Value  | Default | Description                                            |
 |-------------|--------|---------|--------------------------------------------------------|
 | <sensor id> | string |         | An alias to use in logs and messages for given sensor. |
