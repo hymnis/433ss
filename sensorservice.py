@@ -1,16 +1,16 @@
 #!/usr/bin/env python
+"""433SS - 433 MHz Sensor Service using rtl_433."""
 
-import ConfigParser
 import json
 import os
-import paho.mqtt.client as paho
 import subprocess
 import sys
-
-parse_lines = False
+import ConfigParser
+import paho.mqtt.client as paho
 
 
 def execute(command):
+    """Execute given command in a subprocess."""
     process = subprocess.Popen(
         command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 
@@ -21,179 +21,206 @@ def execute(command):
             break
 
         # Parse line for data (from 'nextline')
-        parseLine(nextline)
+        parse_line(nextline)
 
     output = process.communicate()[0]
-    exitCode = process.returncode
+    exit_code = process.returncode
 
-    if (exitCode == 0):
-        return output
-    else:
-        raise Exception(command, exitCode, output)
+    if exit_code != 0:
+        raise Exception(command, exit_code, output)
 
-
-def findNth(haystack, needle, n):
-    parts = haystack.split(needle, n + 1)
-
-    if len(parts) <= n + 1:
-        return -1
-
-    return len(haystack) - len(parts[-1]) - len(needle)
+    return output
 
 
-def parseLine(line):
-    global parse_lines
-
+def parse_line(line):
+    """Parse given line for sensor data."""
     if "Tuned to " in line:
         print("Tuner started. Waiting for sensor data...")
-        parse_lines = True
-        return None
+
+        # Turn on line parsing after tuner has initiolized
+        SETTINGS['parse_lines'] = True
 
     # JSON output
-    if parse_lines:
+    if SETTINGS['parse_lines']:
         try:
             json_line = json.loads(line)
 
             if json_line is not None:
-                if json_line["model"] == "Prologue sensor":
-                    sensorid = "{}.{}.{}".format(
-                        json_line["id"], json_line["rid"], json_line["channel"])
-                    processOutput(sensorid, "battery", json_line["battery"])
-                    processOutput(sensorid, "button", json_line["button"])
-                    processOutput(
-                        sensorid, "temperature",
-                        round(float(json_line["temperature_C"]), 1))
-                    hum_str = str(json_line["humidity"])[::-1]
-                    if len(hum_str) > 2:
-                        hum_str = "{}.{}".format(hum_str[0:2], hum_str[2:3])
-                        processOutput(sensorid, "humidity", float(hum_str))
-                    else:
-                        processOutput(sensorid, "humidity", int(json_line["humidity"]))
-                elif json_line["model"] == "WT450 sensor":
-                    sensorid = "{}.{}".format(
-                        json_line["id"], json_line["channel"])
-                    processOutput(
-                        sensorid, "temperature",
-                        round(float(json_line["temperature_C"]), 1))
-                    processOutput(sensorid, "humidity", int(json_line["humidity"]))
-                    processOutput(sensorid, "battery", json_line["battery"])
-                elif json_line["model"] == "Nexus Temperature":
-                    sensorid = "{}.{}".format(
-                        json_line["id"], json_line["channel"])
-                    processOutput(sensorid, "battery", json_line["battery"])
-                    processOutput(
-                        sensorid, "temperature",
-                        round(float(json_line["temperature_C"]), 1))
+                process_json_data(json_line)
         except KeyError as ex:
-            pass
-            # print("Parse error, invalid key: {}".format(ex))
+            if SETTINGS['debug']:
+                print("Parse error, invalid key: {}".format(ex))
         except TypeError as ex:
-            pass
-            # print("Parse error, type error: {}".format(ex))
-        except:
+            if SETTINGS['debug']:
+                print("Parse error, type error: {}".format(ex))
+        except Exception:  # pylint: disable=W0703
             print("Parse error!\n{}".format(sys.exc_info()[0]))
 
 
-def processOutput(sensorid, sensortype, value):
-    for sensor, alias in alias_list:
+def process_json_data(json_line):
+    """Handle the JSON data."""
+    if json_line["model"] == "Prologue sensor":
+        sensorid = "{}.{}.{}".format(
+            json_line["id"],
+            json_line["rid"],
+            json_line["channel"])
+        process_output(sensorid, "battery", json_line["battery"])
+        process_output(sensorid, "button", json_line["button"])
+        process_output(
+            sensorid, "temperature",
+            round(float(json_line["temperature_C"]), 1))
+        hum_str = str(json_line["humidity"])[::-1]
+        if len(hum_str) > 2:
+            hum_str = "{}.{}".format(hum_str[0:2], hum_str[2:3])
+            process_output(sensorid, "humidity", float(hum_str))
+        else:
+            process_output(
+                sensorid, "humidity", int(json_line["humidity"]))
+    elif json_line["model"] == "WT450 sensor":
+        sensorid = "{}.{}".format(
+            json_line["id"], json_line["channel"])
+        process_output(
+            sensorid, "temperature",
+            round(float(json_line["temperature_C"]), 1))
+        process_output(
+            sensorid, "humidity", int(json_line["humidity"]))
+        process_output(sensorid, "battery", json_line["battery"])
+    elif json_line["model"] == "Nexus Temperature":
+        sensorid = "{}.{}".format(
+            json_line["id"], json_line["channel"])
+        process_output(sensorid, "battery", json_line["battery"])
+        process_output(
+            sensorid, "temperature",
+            round(float(json_line["temperature_C"]), 1))
+
+
+def process_output(sensorid, sensortype, value):
+    """Handle the parsed sensor data."""
+    for sensor, alias in SETTINGS['alias_list']:
         if sensorid == sensor:
             sensorid = alias
             break
 
-    if output_file:
-        updateFile(sensorid, sensortype, value)
+    if SETTINGS['output_file']:
+        update_file(sensorid, sensortype, value)
 
-    if output_mqtt:
+    if SETTINGS['output_mqtt']:
         topic = "home/{}/{}".format(sensorid, sensortype)
         message = value  # usually no modifications needed
-        publishMqtt(topic, message)
+        publish_mqtt(topic, message)
 
 
-def publishMqtt(topic, message):
+def publish_mqtt(topic, message):
+    """Publish given message under specified topic."""
     try:
         mqttc = paho.Client("433ss")
         # mqttc.will_set("/event/dropped", "Sorry, I seem to have died.")
-        mqttc.on_publish = onPublish
-        mqttc.username_pw_set(mqtt_username, mqtt_password)
-        mqttc.connect(mqtt_broker, mqtt_port, 60)
-
+        mqttc.on_publish = on_publish
+        mqttc.username_pw_set(
+            SETTINGS['mqtt_username'], SETTINGS['mqtt_password'])
+        mqttc.connect(SETTINGS['mqtt_broker'], SETTINGS['mqtt_port'], 60)
         mqttc.publish(topic, message)
-    except Exception as ex:
+    except Exception as ex:  # pylint: disable=W0703
         print("MQTT error!\n{}".format(ex))
 
 
-def onPublish(client, packet, mid):
+def on_publish(client, packet, mid):  # pylint: disable=W0613
+    """Run once MQTT message is published."""
     client.disconnect()
 
 
-def updateFile(sensorid, sensortype, value):
-    if os.path.isdir(file_path) is False:
-        os.makedirs(file_path)
+def update_file(sensorid, sensortype, value):
+    """Update sensor data file."""
+    if os.path.isdir(SETTINGS['file_path']) is False:
+        os.makedirs(SETTINGS['file_path'])
 
-    datafile = "%s/%s-%s" % (file_path, sensorid, sensortype)
+    datafile = "%s/%s-%s" % (SETTINGS['file_path'], sensorid, sensortype)
 
-    f = open(datafile, 'w')
-    f.write("{}".format(value))
-    f.close()
+    file_handle = open(datafile, 'w')
+    file_handle.write("{}".format(value))
+    file_handle.close()
 
 
-def removeOldSensors(path):
-    if os.path.isdir(file_path) is True:
-        for fileitem in os.listdir(path):
-            filepath = "{}/{}".format(path, fileitem)
+def remove_old_sensors():
+    """Remove old sensor data files."""
+    if os.path.isdir(SETTINGS['file_path']) is True:
+        for fileitem in os.listdir(SETTINGS['file_path']):
+            filepath = "{}/{}".format(SETTINGS['file_path'], fileitem)
             os.remove(filepath)
 
 
-if __name__ == "__main__":
-    # Defaul settings
-    output_file = False
-    output_mqtt = False
-    frequency = 433748300
-    binary = "/usr/bin/rtl_433"
-    file_path = "/tmp/433sensors"
-    mqtt_broker = ""
-    mqtt_port = 1883
-    mqtt_username = ""
-    mqtt_password = ""
+def get_default_settings():
+    """Return a dict of default values."""
+    default_settings = {
+        'debug': False,
+        'parse_lines': False,
+        'output_file': False,
+        'output_mqtt': False,
+        'frequency': 433748300,
+        'binary': "/usr/bin/rtl_433",
+        'file_path': "/tmp/433sensors",
+        'mqtt_broker': "",
+        'mqtt_port': 1883,
+        'mqtt_username': "",
+        'mqtt_password': ""
+    }
 
-    # Settings from file
+    return default_settings
+
+
+def read_settings():
+    """Read settings from .cfg file."""
+    file_settings = get_default_settings()
+
     if os.path.exists("sensorservice.cfg"):
         try:
             config = ConfigParser.ConfigParser()
             config.read("sensorservice.cfg")
 
             if config.has_section("main"):
-                frequency = config.getint("main", "frequency")
-                binary = config.get("main", "binary")
+                debug_string = config.get("main", "debug")
+                if debug_string.lower() == 'true':
+                    file_settings['debug'] = True
+                file_settings['frequency'] = config.getint("main", "frequency")
+                file_settings['binary'] = config.get("main", "binary")
 
             if config.has_section("file"):
-                file_path = config.get("file", "path")
-                output_file = True
+                file_settings['file_path'] = config.get("file", "path")
+                file_settings['output_file'] = True
 
             if config.has_section("mqtt"):
-                mqtt_broker = config.get("mqtt", "broker")
-                mqtt_port = config.get("mqtt", "port")
-                mqtt_username = config.get("mqtt", "username")
-                mqtt_password = config.get("mqtt", "password")
-                output_mqtt = True
+                file_settings['mqtt_broker'] = config.get("mqtt", "broker")
+                file_settings['mqtt_port'] = config.get("mqtt", "port")
+                file_settings['mqtt_username'] = config.get("mqtt", "username")
+                file_settings['mqtt_password'] = config.get("mqtt", "password")
+                file_settings['output_mqtt'] = True
 
             if config.has_section("alias"):
-                alias_list = config.items("alias")
+                file_settings['alias_list'] = config.items("alias")
         except ConfigParser.NoSectionError:
             print("Missing section, ignoring settings from file.")
+            file_settings = get_default_settings()
         except ConfigParser.NoOptionError:
             print("Missing value, ignoring settings from file.")
+            file_settings = get_default_settings()
 
-    # Run main loop
+    return file_settings
+
+
+if __name__ == "__main__":
+    SETTINGS = read_settings()
+
     try:
-        rtl_433 = "{} -F json -f {}".format(binary, frequency)
-        returncode = execute(rtl_433)
-        print("Execution stopped ({}). Exiting...".format(returncode))
-        removeOldSensors(file_path)
-    except Exception as ex:
-        print("Error!\n{}".format(ex.args))
-        removeOldSensors(file_path)
+        # Run main loop
+        RTL_433 = "{} -F json -f {}".format(
+            SETTINGS['binary'], SETTINGS['frequency'])
+        RETURNCODE = execute(RTL_433)
+        print("Execution stopped ({}). Exiting...".format(RETURNCODE))
+        remove_old_sensors()
     except KeyboardInterrupt:
         print("\nUser stopped execution. Exiting...")
-        removeOldSensors(file_path)
+        remove_old_sensors()
         sys.exit()
+    except Exception as ex:  # pylint: disable=W0703
+        print("Error!\n{}".format(ex.args))
+        remove_old_sensors()

@@ -1,4 +1,5 @@
 [main]
+debug = False
 frequency = 433748300
 binary = /usr/bin/rtl_433
 
@@ -14,4 +15,3 @@ password = mqtt-pass
 [alias]
 1.1.1 = outside
 2.2.2 = inside
-
